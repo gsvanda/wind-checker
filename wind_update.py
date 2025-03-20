@@ -15,7 +15,7 @@ SVANTEK_API_KEY = os.environ.get('SVANTEK_API_KEY')
 PROJECTS_URL = "https://svannet.com/api/v2.5/projects-get-data.php"
 DATA_URL = "https://svannet.com/api/v2.5/projects-get-result-data.php"
 
-# Fetch Asset Panda data
+# Fetch Asset Panda data (Pad Names, GPS, Status, and Object IDs)
 def get_asset_panda_data():
     headers = {
         "accept": "application/json",
@@ -23,6 +23,7 @@ def get_asset_panda_data():
         "Content-Type": "application/json"
     }
     payload = {"search": {}}
+
     try:
         response = requests.post(ASSET_PANDA_FETCH_URL, headers=headers, json=payload)
         if response.status_code == 200:
@@ -44,7 +45,7 @@ def get_asset_panda_data():
         print(f"Asset Panda Fetch Request Error: {e}")
         return []
 
-# Parse GPS coordinates
+# Function to parse GPS coordinates into latitude and longitude
 def parse_gps(gps_str):
     if gps_str == "Not specified":
         return None, None
@@ -54,7 +55,7 @@ def parse_gps(gps_str):
     except (ValueError, AttributeError):
         return None, None
 
-# Fetch Open-Meteo wind gust data
+# Function to fetch Open-Meteo wind gust data
 def get_openmeteo_max_gusts(locations):
     results = []
     for location in locations:
@@ -87,6 +88,7 @@ def get_openmeteo_max_gusts(locations):
             local_time = max_timestamp_utc.astimezone(local_tz)
             local_time_str = local_time.strftime("%Y-%m-%d %H:%M:%S %Z")
             
+            # Updated format for Asset Panda
             max_wind_speed_str = f"{max_gust_mph:.2f} mph at {local_time_str}"
             
             results.append({
@@ -95,7 +97,7 @@ def get_openmeteo_max_gusts(locations):
                 "max_wind_speed_mph": max_gust_mph,
                 "formatted": f"{name.upper()} (Open-Meteo): Max Wind Gust = {max_gust_mph:.2f} mph at {local_time_str} (Status: {status})",
                 "object_id": obj_id,
-                "max_wind_speed_str": max_wind_speed_str
+                "max_wind_speed_str": max_wind_speed_str  # New format for field_108
             })
     return results
 
@@ -122,6 +124,7 @@ def fetch_svantek_wind_data(project_id, point_id):
     now = datetime.now(timezone.utc)
     time_to = now.strftime("%Y-%m-%d %H:%M:%S")
     time_from = (now - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
+
     payload = {
         "key": SVANTEK_API_KEY,
         "project": project_id,
@@ -130,6 +133,7 @@ def fetch_svantek_wind_data(project_id, point_id):
         "time_to": time_to,
         "results": json.dumps(["meteo_wind_speed_max-T"])
     }
+
     try:
         response = requests.post(DATA_URL, data=payload, timeout=10)
         response.raise_for_status()
@@ -143,8 +147,10 @@ def fetch_svantek_wind_data(project_id, point_id):
 def find_svantek_max_wind_speed(project_id, project_name, data):
     if not data or "results" not in data:
         return None, None
+
     max_wind_speed_ms = 0.0
     max_timestamp = None
+
     for result in data["results"]:
         for record in result.get("data", []):
             wind_speed_str = record.get("values", [])[0]
@@ -156,6 +162,7 @@ def find_svantek_max_wind_speed(project_id, project_name, data):
                         max_timestamp = record.get("timestamp")
                 except ValueError:
                     continue
+
     if max_timestamp:
         utc_time = datetime.strptime(max_timestamp, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
         mst = pytz.timezone("America/Denver")
@@ -163,12 +170,14 @@ def find_svantek_max_wind_speed(project_id, project_name, data):
         formatted_time = mst_time.strftime("%Y-%m-%d %H:%M:%S %Z")
     else:
         formatted_time = "No timestamp available"
+
     return max_wind_speed_ms, formatted_time
 
 def get_svantek_wind_speed(pad_data):
     project_data = fetch_projects_and_points()
     if not project_data:
         return []
+
     results = []
     for pad in pad_data:
         pad_name = pad['Pad Name'].upper()
@@ -176,11 +185,15 @@ def get_svantek_wind_speed(pad_data):
         obj_id = pad['id']
         if status not in ["Active", "Idle"]:
             continue
+
         project_max_wind_ms = 0.0
         project_max_time = None
+        project_name_match = None
+
         for project_id, data in project_data.items():
             project_name = data["name"].upper()
             if pad_name in project_name or project_name in pad_name:
+                project_name_match = data["name"]
                 points = data["points"]
                 for point_id in points:
                     sv_data = fetch_svantek_wind_data(project_id, point_id)
@@ -189,33 +202,43 @@ def get_svantek_wind_speed(pad_data):
                         if max_wind_ms and max_wind_ms > project_max_wind_ms:
                             project_max_wind_ms = max_wind_ms
                             project_max_time = max_time
+
         if project_max_wind_ms > 0:
             max_wind_mph = round(project_max_wind_ms * 2.23694, 2)
             formatted_str = f"{pad_name} (Svantek): Max Wind Speed = {max_wind_mph:.2f} mph at {project_max_time} (Status: {status})"
+            # Updated format for Asset Panda
             max_wind_speed_str = f"{max_wind_mph:.2f} mph at {project_max_time}"
+            
             results.append({
                 "source": "Svantek",
                 "name": pad_name,
                 "max_wind_speed_mph": max_wind_mph,
                 "formatted": formatted_str,
                 "object_id": obj_id,
-                "max_wind_speed_str": max_wind_speed_str
+                "max_wind_speed_str": max_wind_speed_str  # New format for field_108
             })
+
     return results
 
-# Update Asset Panda
+# Function to update Asset Panda with wind speeds
 def update_asset_panda_wind_speeds(results):
     headers = {
         "accept": "application/json",
         "Authorization": f"Bearer {ASSET_PANDA_BEARER_TOKEN}",
         "Content-Type": "application/json"
     }
+    
+    # Prepare payload for batch update
     payload = {
         "objects": [
-            {"id": result["object_id"], "field_108": result["max_wind_speed_str"]}
+            {
+                "id": result["object_id"],
+                "field_108": result["max_wind_speed_str"]  # Max Wind Speed field with new format
+            }
             for result in results if result["object_id"] != "Not specified"
         ]
     }
+
     try:
         response = requests.put(ASSET_PANDA_UPDATE_URL, headers=headers, json=payload)
         if response.status_code == 200:
@@ -225,13 +248,15 @@ def update_asset_panda_wind_speeds(results):
     except requests.exceptions.RequestException as e:
         print(f"\nAsset Panda Update Request Error: {e}")
 
-# Main function
+# Main function to combine Asset Panda, Svantek, and Open-Meteo data, then update Asset Panda
 def main():
+    # Fetch Asset Panda data
     pad_data = get_asset_panda_data()
     if not pad_data:
         print("Failed to fetch Asset Panda data. Exiting.")
         return
 
+    # Filter for Active or Idle pads and prepare locations for Open-Meteo
     locations = []
     for pad in pad_data:
         if pad['Status'] in ["Active", "Idle"]:
@@ -239,15 +264,19 @@ def main():
             if lat is not None and lon is not None:
                 locations.append((lat, lon, pad['Pad Name'], pad['Status'], pad['id']))
 
+    # Fetch Svantek data first
     svantek_results = get_svantek_wind_speed(pad_data)
     svantek_pad_names = {r["name"] for r in svantek_results}
 
+    # Fetch Open-Meteo data only for pads not covered by Svantek
     openmeteo_locations = [loc for loc in locations if loc[2].upper() not in svantek_pad_names]
     openmeteo_results = get_openmeteo_max_gusts(openmeteo_locations)
 
+    # Combine results with Svantek prioritized
     all_results = svantek_results + openmeteo_results
     all_results.sort(key=lambda x: x["max_wind_speed_mph"], reverse=True)
 
+    # Print report
     print(f"Run at {datetime.now(pytz.timezone('America/Denver')).strftime('%Y-%m-%d %H:%M:%S %Z')}")
     print("Subject: Wind Speed Report (Last 24 Hours)\n")
     print("Below is the wind speed report for the last 24 hours (Active/Idle Pads Only):\n")
@@ -258,6 +287,7 @@ def main():
         overall_max = max(all_results, key=lambda x: x["max_wind_speed_mph"])
         print(f"\nOverall max wind speed: {overall_max['formatted']};")
 
+    # Update Asset Panda with wind speeds
     update_asset_panda_wind_speeds(all_results)
 
 if __name__ == "__main__":
