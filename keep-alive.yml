@@ -1,0 +1,13 @@
+name: Keep Alive
+
+on:
+  schedule:
+    - cron: '0 0 1 * *'  # Runs 1st of every month
+  workflow_dispatch:
+
+jobs:
+  keep-alive:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: gautamkrishnar/keepalive-workflow@v1
