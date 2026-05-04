@@ -5,6 +5,7 @@
 To get Asset Panda token go to: https://team-asset-panda.readme.io/reference/post_v3-session-token
 1. Enter login credentials
 2. Click "run" or "try it"
+3. Update toke in Settings - secrets and variables - actions - ASSET_PANDA_TOKEN
 
 Updates:
 
